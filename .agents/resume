@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${repo_root}"
+
+for command_name in git make meson ninja java javac 7z; do
+    if ! command -v "${command_name}" >/dev/null; then
+        printf '[orb resume] Required command is unavailable: %s\n' "${command_name}" >&2
+        exit 1
+    fi
+done
+
+for executable_path in \
+    base/toolchain/android-ndk-r23c/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang \
+    base/toolchain/android-sdk-linux/build-tools/34.0.0/aapt2; do
+    if [[ ! -x "${executable_path}" ]]; then
+        printf '[orb resume] Android toolchain executable is unavailable: %s\n' "${executable_path}" >&2
+        exit 1
+    fi
+done
+
+printf '[orb resume] Development environment is ready; no services need restarting\n'

@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${repo_root}"
+
+run_step() {
+    local description="$1"
+    shift
+    local start_time=${SECONDS}
+    printf '[orb setup] %s\n' "${description}"
+    "$@"
+    printf '[orb setup] %s completed in %ss\n' "${description}" "$((SECONDS - start_time))"
+}
+
+install_system_packages() {
+    local packages=(
+        autoconf
+        automake
+        build-essential
+        ca-certificates
+        ccache
+        cmake
+        gcc-multilib
+        gettext
+        git
+        libegl-dev
+        libtool
+        libtool-bin
+        libwayland-dev
+        libx11-dev
+        libxcursor-dev
+        libxext-dev
+        libxi-dev
+        libxkbcommon-dev
+        libxrandr-dev
+        libxss-dev
+        libxtst-dev
+        lua-check
+        nasm
+        ninja-build
+        openjdk-17-jdk-headless
+        p7zip-full
+        patch
+        pkg-config
+        python3
+        python3-venv
+        shellcheck
+        shfmt
+        unzip
+        wget
+    )
+    local missing=()
+    local package
+
+    for package in "${packages[@]}"; do
+        if ! dpkg-query -W -f='${db:Status-Status}' "${package}" 2>/dev/null | grep -qx installed; then
+            missing+=("${package}")
+        fi
+    done
+
+    if ((${#missing[@]} == 0)); then
+        printf '[orb setup] System packages are already installed\n'
+        return
+    fi
+
+    sudo apt-get update
+    sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${missing[@]}"
+}
+
+install_meson() {
+    local meson_version=1.4.1
+    local tool_root="${HOME}/.local/share/koreader-orb-tools"
+    local meson_venv="${tool_root}/meson-${meson_version}"
+
+    if [[ ! -x "${meson_venv}/bin/meson" ]] ||
+        [[ "$("${meson_venv}/bin/meson" --version)" != "${meson_version}" ]]; then
+        python3 -m venv "${meson_venv}"
+        "${meson_venv}/bin/pip" install \
+            --disable-pip-version-check \
+            --no-cache-dir \
+            "meson==${meson_version}"
+    fi
+
+    mkdir -p "${HOME}/.local/bin"
+    ln -sfn "${meson_venv}/bin/meson" "${HOME}/.local/bin/meson"
+    export PATH="${HOME}/.local/bin:${PATH}"
+    meson --version
+}
+
+prepare_git_history() {
+    if git describe HEAD >/dev/null 2>&1; then
+        return
+    fi
+
+    git fetch --force --tags origin
+    if [[ -z "$(git tag -l)" ]]; then
+        git fetch --force --tags https://github.com/koreader/koreader.git
+    fi
+    if git describe HEAD >/dev/null 2>&1; then
+        return
+    fi
+
+    local deepen_by
+    for deepen_by in 256 512 1024; do
+        if [[ "$(git rev-parse --is-shallow-repository)" != true ]]; then
+            break
+        fi
+        git fetch --deepen="${deepen_by}" origin
+        if git describe HEAD >/dev/null 2>&1; then
+            return
+        fi
+    done
+
+    git describe HEAD >/dev/null
+}
+
+fetch_submodules() {
+    CI=1 make fetchthirdparty
+}
+
+prepare_android_toolchain() {
+    make -C base/toolchain android
+}
+
+run_step 'Install system packages' install_system_packages
+run_step 'Install Meson 1.4.1' install_meson
+run_step 'Ensure version tags are available' prepare_git_history
+run_step 'Fetch git submodules' fetch_submodules
+run_step 'Prepare Android SDK and NDK' prepare_android_toolchain
+
+printf '[orb setup] Ready: meson %s, ninja %s, Java %s, Android SDK/NDK, %s submodules initialized\n' \
+    "$(meson --version)" \
+    "$(ninja --version)" \
+    "$(javac -version 2>&1 | awk '{print $2}')" \
+    "$(git submodule status | wc -l)"
