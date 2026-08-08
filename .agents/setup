@@ -40,6 +40,7 @@ install_system_packages() {
         lua-check
         nasm
         ninja-build
+        openjdk-17-jdk-headless
         p7zip-full
         patch
         pkg-config
@@ -119,12 +120,18 @@ fetch_submodules() {
     CI=1 make fetchthirdparty
 }
 
+prepare_android_toolchain() {
+    make -C base/toolchain android
+}
+
 run_step 'Install system packages' install_system_packages
 run_step 'Install Meson 1.4.1' install_meson
 run_step 'Ensure version tags are available' prepare_git_history
 run_step 'Fetch git submodules' fetch_submodules
+run_step 'Prepare Android SDK and NDK' prepare_android_toolchain
 
-printf '[orb setup] Ready: meson %s, ninja %s, %s submodules initialized\n' \
+printf '[orb setup] Ready: meson %s, ninja %s, Java %s, Android SDK/NDK, %s submodules initialized\n' \
     "$(meson --version)" \
     "$(ninja --version)" \
+    "$(javac -version 2>&1 | awk '{print $2}')" \
     "$(git submodule status | wc -l)"
